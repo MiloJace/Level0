@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Level 0</title>
+<style>
+  html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; font-family: "Courier New", monospace; }
+  #canvas-holder { position:fixed; inset:0; }
+  #overlay {
+    position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background:radial-gradient(ellipse at center, rgba(40,36,10,0.85) 0%, rgba(5,5,0,0.97) 75%);
+    color:#d9c96a; text-align:center; z-index:20; cursor:pointer;
+    transition:opacity 0.8s ease;
+  }
+  #overlay h1 {
+    font-size:2.2em; letter-spacing:0.35em; margin:0 0 0.3em 0; font-weight:400;
+    text-shadow: 0 0 12px rgba(217,201,106,0.5);
+  }
+  #overlay p { font-size:0.95em; opacity:0.75; line-height:1.9; max-width:480px; margin:0.4em 0; }
+  #overlay .blink { animation: blink 2.4s infinite; }
+  @keyframes blink { 0%,45%{opacity:0.75} 47%{opacity:0.15} 49%{opacity:0.75} 90%{opacity:0.75} 92%{opacity:0.2} 94%{opacity:0.75} }
+  #hud {
+    position:fixed; left:14px; bottom:12px; color:rgba(217,201,106,0.35); font-size:11px;
+    letter-spacing:0.15em; z-index:10; pointer-events:none; user-select:none;
+  }
+  #timeElapsed {
+    position:fixed; right:14px; top:12px; color:rgba(217,201,106,0.3); font-size:11px;
+    letter-spacing:0.1em; z-index:10; pointer-events:none; user-select:none;
+  }
+  #fps {
+    position:fixed; left:14px; top:12px; color:rgba(217,201,106,0.25); font-size:10px;
+    letter-spacing:0.1em; z-index:10; pointer-events:none; user-select:none;
+  }
+  #vignette {
+    position:fixed; inset:0; pointer-events:none; z-index:5;
+    box-shadow: inset 0 0 220px 60px rgba(0,0,0,0.75);
+  }
+  #whisper {
+    position:fixed; left:50%; top:38%; transform:translate(-50%,-50%);
+    color:rgba(217,201,106,0.55); font-size:13px; letter-spacing:0.25em; z-index:10;
+    pointer-events:none; opacity:0; transition:opacity 2.5s ease; user-select:none; text-align:center;
+    width:80%;
+  }
+  #buzz-toggle {
+    position:fixed; right:14px; bottom:12px; z-index:10; color:rgba(217,201,106,0.3);
+    font-size:11px; letter-spacing:0.1em; user-select:none;
+  }
+  #signature {
+    position:fixed; left:50%; bottom:4px; transform:translateX(-50%);
+    color:rgba(217,201,106,0.28); font-size:10px; letter-spacing:0.2em;
+    z-index:10; pointer-events:none; user-select:none;
+  }
+
+  /* ---- 触屏控制（默认隐藏，JS 检测到触屏设备后显示） ---- */
+  #touch-joystick-zone {
+    display:none; position:fixed; left:26px; bottom:26px; width:130px; height:130px; z-index:15;
+    touch-action:none;
+  }
+  #touch-joystick-base {
+    position:absolute; inset:0; border-radius:50%;
+    background:rgba(217,201,106,0.08); border:1px solid rgba(217,201,106,0.25);
+  }
+  #touch-joystick-knob {
+    position:absolute; width:54px; height:54px; left:38px; top:38px; border-radius:50%;
+    background:rgba(217,201,106,0.28); border:1px solid rgba(217,201,106,0.45);
+    transition:left 0.05s linear, top 0.05s linear;
+  }
+  #touch-look-zone {
+    display:none; position:fixed; right:0; top:0; width:55%; height:100%; z-index:14;
+    touch-action:none;
+  }
+  #touch-hint {
+    display:none; position:fixed; left:50%; bottom:170px; transform:translateX(-50%);
+    color:rgba(217,201,106,0.4); font-size:11px; letter-spacing:0.1em; z-index:15;
+    pointer-events:none; user-select:none; white-space:nowrap;
+  }
+</style>
+</head>
+<body>
+<div id="canvas-holder"></div>
+<div id="vignette"></div>
+<div id="hud">WASD / 方向键 移动 &nbsp;·&nbsp; 鼠标 环顾 &nbsp;·&nbsp; ESC 释放光标</div>
+<div id="timeElapsed">已徘徊 00:00</div>
+<div id="fps"></div>
+<div id="debug-graffiti" style="position:fixed; left:14px; top:28px; color:rgba(217,201,106,0.25); font-size:10px; letter-spacing:0.1em; z-index:10; pointer-events:none; user-select:none;"></div>
+<div id="whisper"></div>
+<div id="buzz-toggle">[M] 静音音效</div>
+<div id="signature">by&nbsp;Milo&nbsp;Jace</div>
+
+<div id="touch-joystick-zone">
+  <div id="touch-joystick-base"></div>
+  <div id="touch-joystick-knob"></div>
+</div>
+<div id="touch-look-zone"></div>
+<div id="touch-hint">左侧摇杆移动 · 右侧拖动环顾四周</div>
+
+<div id="overlay">
+  <h1>后&nbsp;室</h1>
+  <p>LEVEL&nbsp;0&nbsp;—&nbsp;"无尽的房间"</p>
+  <p>发霉的黄色壁纸，潮湿的地毯，<br>荧光灯永不停息地嗡鸣与闪烁。</p>
+  <p class="blink">如果你不够小心，就会被"没顶"到这里。<br>没有怪物，只有空间本身。</p>
+  <p id="overlay-hint" style="margin-top:1.6em; opacity:0.55; font-size:0.85em;">点击开始 · 你将永远走不出去</p>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function(){
+  "use strict";
+
+  // ---------- 基础场景 ----------
+  const scene = new THREE.Scene();
+  const FOG_COLOR = 0x8f7a35; // 发霉的黄色调，取代默认黑色背景
+  scene.fog = new THREE.FogExp2(FOG_COLOR, 0.032);
+  scene.background = new THREE.Color(FOG_COLOR);
+
+  const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.05, 70);
+  camera.position.set(0, 1.65, 0);
+
+  const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:"high-performance" });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+  renderer.shadowMap.enabled = false;
+  document.getElementById('canvas-holder').appendChild(renderer.domElement);
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth/window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  // ---------- 程序化贴图：发霉黄壁纸 & 地毯 ----------
+  function makeWallpaperTexture() {
+    const c = document.createElement('canvas'); c.width = 256; c.height = 256;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#a89344'; ctx.fillRect(0,0,256,256);
+    for (let x=0; x<256; x+=16) {
+      ctx.fillStyle = (x/16)%2===0 ? 'rgba(150,130,60,0.18)' : 'rgba(90,75,25,0.12)';
+      ctx.fillRect(x,0,16,256);
+    }
+    for (let i=0;i<35;i++){
+      const x = Math.random()*256, y = Math.random()*256, r = 6+Math.random()*22;
+      const grad = ctx.createRadialGradient(x,y,0,x,y,r);
+      const dark = Math.random()>0.5;
+      grad.addColorStop(0, dark ? 'rgba(40,35,10,0.35)' : 'rgba(60,55,15,0.25)');
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
+    }
+    const imgData = ctx.getImageData(0,0,256,256);
+    for (let i=0;i<imgData.data.length;i+=4){
+      const n = (Math.random()-0.5)*18;
+      imgData.data[i]+=n; imgData.data[i+1]+=n*0.9; imgData.data[i+2]+=n*0.5;
+    }
+    ctx.putImageData(imgData,0,0);
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    return tex;
+  }
+
+  function makeCarpetTexture() {
+    const c = document.createElement('canvas'); c.width = 256; c.height = 256;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#8a742b'; ctx.fillRect(0,0,256,256);
+    const grid = 16;
+    for (let y=0;y<256;y+=grid){
+      for (let x=0;x<256;x+=grid){
+        const shade = 0.75 + Math.random()*0.5;
+        ctx.fillStyle = `rgba(${120*shade|0},${100*shade|0},${35*shade|0},1)`;
+        ctx.fillRect(x,y,grid-1,grid-1);
+      }
+    }
+    for (let i=0;i<20;i++){
+      const x = Math.random()*256, y = Math.random()*256, r = 8+Math.random()*30;
+      const grad = ctx.createRadialGradient(x,y,0,x,y,r);
+      grad.addColorStop(0,'rgba(30,25,5,0.3)');
+      grad.addColorStop(1,'rgba(0,0,0,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(6,6);
+    return tex;
+  }
+
+  function makeCeilingTexture() {
+    const c = document.createElement('canvas'); c.width=128; c.height=128;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#cfc79a'; ctx.fillRect(0,0,128,128);
+    ctx.strokeStyle = 'rgba(120,110,70,0.6)'; ctx.lineWidth = 2;
+    ctx.strokeRect(0,0,128,128);
+    for (let i=0;i<15;i++){
+      ctx.fillStyle = 'rgba(90,80,40,0.15)';
+      ctx.beginPath();
+      ctx.arc(Math.random()*128, Math.random()*128, 3+Math.random()*7, 0, Math.PI*2);
+      ctx.fill();
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    return tex;
+  }
+
+  const wallpaperTex = makeWallpaperTexture();
+  const carpetTex = makeCarpetTexture();
+  const ceilingTex = makeCeilingTexture();
+
+  // 用 MeshLambertMaterial 替代 MeshStandardMaterial：省去逐像素 PBR 计算，帧率更稳
+  const wallMat = new THREE.MeshLambertMaterial({ map: wallpaperTex });
+
+  // ---------- 涂鸦贴图（透明背景 PNG，需与本 html 放在同一文件夹）----------
+  const GRAFFITI_FILES = [
+    "Are you here.png", "Smile.png", "See You.png",
+    "God Bless You.png", "I hate you.png", "Where are u.png"
+  ];
+  const textureLoader = new THREE.TextureLoader();
+  const graffitiTextures = GRAFFITI_FILES.map(name => textureLoader.load(
+    name, undefined, undefined,
+    () => console.warn('涂鸦贴图加载失败，请确认它与 html 文件放在同一文件夹：', name)
+  ));
+  const GRAFFITI_PROB = 0.10;
+
+  function maybeAddGraffiti(group, dir, wx, wz) {
+    if (Math.random() > GRAFFITI_PROB) return;
+    const tex = graffitiTextures[Math.floor(Math.random()*graffitiTextures.length)];
+    const w = 0.8 + Math.random()*0.5;
+    const h = w * (0.55 + Math.random()*0.35);
+    // 透明背景贴图：不写深度，避免和墙体产生 z-fighting 闪烁；alphaTest 裁掉透明部分的黑边
+    const mat = new THREE.MeshBasicMaterial({
+      map: tex, transparent: true, alphaTest: 0.05, depthWrite: false, side: THREE.FrontSide
+    });
+    const geo = new THREE.PlaneGeometry(w, h);
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.userData.isGraffiti = true;
+    const yPos = 1.1 + Math.random()*1.2;
+    const along = (Math.random()-0.5) * Math.max(0, INNER_WALL_LEN - w - 0.2);
+    const eps = 0.03; // 贴图相对墙面略微前移，避免与墙体贴图共面闪烁
+    if (dir === 0) { // 北墙，朝向室内（+Z）
+      mesh.position.set(wx + along, yPos, wz - CELL/2 + WALL_T/2 + eps);
+    } else if (dir === 2) { // 南墙，朝向室内（-Z）
+      mesh.rotation.y = Math.PI;
+      mesh.position.set(wx + along, yPos, wz + CELL/2 - WALL_T/2 - eps);
+    } else if (dir === 3) { // 西墙，朝向室内（+X）
+      mesh.rotation.y = Math.PI/2;
+      mesh.position.set(wx - CELL/2 + WALL_T/2 + eps, yPos, wz + along);
+    } else if (dir === 1) { // 东墙，朝向室内（-X）
+      mesh.rotation.y = -Math.PI/2;
+      mesh.position.set(wx + CELL/2 - WALL_T/2 - eps, yPos, wz + along);
+    }
+    group.add(mesh);
+  }
+  const floorMat = new THREE.MeshLambertMaterial({ map: carpetTex });
+  const ceilMat = new THREE.MeshLambertMaterial({ map: ceilingTex });
+
+  // ---------- 迷宫参数 ----------
+  const CELL = 4;
+  const WALL_H = 3.6;
+  const WALL_T = 0.5;
+  const RENDER_RADIUS = 9;   // 加大渲染半径，视野更远（配合固定光源池与共享几何体，性能仍可控）
+  const LIGHT_POOL_SIZE = 8; // 固定数量的真实光源，避免运行时改变光源总数导致着色器重新编译
+
+  function hash2(x, y) {
+    let n = Math.sin(x*127.1 + y*311.7) * 43758.5453123;
+    return n - Math.floor(n);
+  }
+  function edgeHash(x1,y1,x2,y2){
+    const ax = Math.min(x1,x2), ay = Math.min(y1,y2);
+    const bx = Math.max(x1,x2), by = Math.max(y1,y2);
+    return hash2(ax*3.13+bx*0.71, ay*3.13+by*0.71 + 91.7);
+  }
+  const WALL_PROB = 0.34;
+  function hasWall(cx, cy, dir) {
+    let nx = cx, ny = cy;
+    if (dir===0) ny -= 1;
+    if (dir===1) nx += 1;
+    if (dir===2) ny += 1;
+    if (dir===3) nx -= 1;
+    return edgeHash(cx,cy,nx,ny) < WALL_PROB;
+  }
+  const LIGHT_PROB = 0.32;
+  function isLightCell(cx,cy){ return hash2(cx*7.7, cy*13.3) < LIGHT_PROB; }
+  // 灯光状态分三档：大部分是稳定不闪的（正常工作的荧光灯），只有少数会闪烁或濒死
+  function lightState(cx,cy) {
+    const h = hash2(cx*5.1, cy*2.2);
+    if (h < 0.55) return 'steady';   // 55% 稳定不闪
+    if (h < 0.85) return 'flicker';  // 30% 轻微闪烁
+    return 'broken';                 // 15% 濒死般的大幅闪烁
+  }
+  function lightBaseIntensity(cx,cy){ return 1.0 + hash2(cx,cy)*0.4; }
+  function lightSeed(cx,cy){ return hash2(cx*3.3, cy*9.9)*1000; }
+
+  // ---------- 共享几何体（避免每格重复创建/销毁，减轻 GC 压力）----------
+  const INNER_WALL_LEN = CELL - WALL_T; // 墙体卡在两侧角柱之间，不与角柱重叠
+  const wallGeo = new THREE.BoxGeometry(INNER_WALL_LEN, WALL_H, WALL_T);
+  const cornerPostGeo = new THREE.BoxGeometry(WALL_T, WALL_H, WALL_T);
+  const pillarLightGeo = new THREE.BoxGeometry(0.6, 0.08, 1.2);
+  const floorGeo = new THREE.PlaneGeometry(CELL, CELL);
+  const ceilGeo = new THREE.PlaneGeometry(CELL, CELL);
+  const SHARED_GEOS = new Set([wallGeo, cornerPostGeo, pillarLightGeo, floorGeo, ceilGeo]);
+
+  // ---------- 分块渲染世界 ----------
+  const worldGroup = new THREE.Group();
+  scene.add(worldGroup);
+  let builtCells = new Map();
+  let panels = []; // { mesh, cx, cy } 用于灯板闪烁动画（不含真实光源，开销很低）
+
+  function buildCell(cx, cy) {
+    const key = cx+","+cy;
+    if (builtCells.has(key)) return;
+    const group = new THREE.Group();
+    const wx = cx*CELL, wz = cy*CELL;
+
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI/2;
+    floor.position.set(wx, 0, wz);
+    group.add(floor);
+
+    const ceil = new THREE.Mesh(ceilGeo, ceilMat);
+    ceil.rotation.x = Math.PI/2;
+    ceil.position.set(wx, WALL_H, wz);
+    group.add(ceil);
+
+    if (hasWall(cx,cy,0)) {
+      const m = new THREE.Mesh(wallGeo, wallMat);
+      m.position.set(wx, WALL_H/2, wz - CELL/2);
+      group.add(m);
+      maybeAddGraffiti(group, 0, wx, wz);
+    }
+    if (hasWall(cx,cy,3)) {
+      const m = new THREE.Mesh(wallGeo, wallMat);
+      m.rotation.y = Math.PI/2;
+      m.position.set(wx - CELL/2, WALL_H/2, wz);
+      group.add(m);
+      maybeAddGraffiti(group, 3, wx, wz);
+    }
+    if (hasWall(cx,cy,1)) {
+      const m = new THREE.Mesh(wallGeo, wallMat);
+      m.rotation.y = Math.PI/2;
+      m.position.set(wx + CELL/2, WALL_H/2, wz);
+      group.add(m);
+      maybeAddGraffiti(group, 1, wx, wz);
+    }
+    if (hasWall(cx,cy,2)) {
+      const m = new THREE.Mesh(wallGeo, wallMat);
+      m.position.set(wx, WALL_H/2, wz + CELL/2);
+      group.add(m);
+      maybeAddGraffiti(group, 2, wx, wz);
+    }
+
+    // 转角柱：只在西北角真的有墙体交汇时才生成（本格的北墙/西墙，或西邻格的北墙、北邻格的西墙），
+    // 而不是每个格子都无条件放一根——避免在完全开阔、没有任何墙的地方也长出柱子。
+    // 每个角只由这一个格子（西北角所在格）负责建造，四邻格共享同一个角不会重复建。
+    const cornerNeeded =
+      hasWall(cx, cy, 0) || hasWall(cx, cy, 3) ||
+      hasWall(cx-1, cy, 0) || hasWall(cx, cy-1, 3);
+    if (cornerNeeded) {
+      const post = new THREE.Mesh(cornerPostGeo, wallMat);
+      post.position.set(wx - CELL/2, WALL_H/2, wz - CELL/2);
+      group.add(post);
+    }
+
+    if (isLightCell(cx,cy)) {
+      const lightMat = new THREE.MeshBasicMaterial({ color:0xfff6cf, transparent:true, opacity:0.95 });
+      const panel = new THREE.Mesh(pillarLightGeo, lightMat);
+      panel.position.set(wx, WALL_H-0.05, wz);
+      group.add(panel);
+      panels.push({ mesh: panel, cx, cy });
+    }
+
+    worldGroup.add(group);
+    builtCells.set(key, group);
+  }
+
+  function removeCell(cx, cy) {
+    const key = cx+","+cy;
+    const g = builtCells.get(key);
+    if (!g) return;
+    worldGroup.remove(g);
+    g.traverse(obj=>{
+      if (obj.material && obj.material.map === undefined) {} // no-op
+      if (obj.geometry && !SHARED_GEOS.has(obj.geometry)) obj.geometry.dispose();
+      if (obj.isMesh && obj.material && obj.material !== wallMat && obj.material !== floorMat && obj.material !== ceilMat) {
+        obj.material.dispose();
+      }
+    });
+    panels = panels.filter(p => p.cx !== cx || p.cy !== cy);
+    builtCells.delete(key);
+  }
+
+  function updateWorld(px, pz) {
+    const ccx = Math.round(px / CELL);
+    const ccz = Math.round(pz / CELL);
+    const needed = new Set();
+    for (let dx=-RENDER_RADIUS; dx<=RENDER_RADIUS; dx++){
+      for (let dy=-RENDER_RADIUS; dy<=RENDER_RADIUS; dy++){
+        if (dx*dx+dy*dy <= RENDER_RADIUS*RENDER_RADIUS) {
+          const cx = ccx+dx, cy = ccz+dy;
+          needed.add(cx+","+cy);
+          buildCell(cx, cy);
+        }
+      }
+    }
+    for (const key of Array.from(builtCells.keys())) {
+      if (!needed.has(key)) {
+        const [cx,cy] = key.split(",").map(Number);
+        removeCell(cx, cy);
+      }
+    }
+    updateLightPool(ccx, ccz);
+
+    // 调试用：统计当前已加载的涂鸦贴图数量，直接在屏幕上验证生成逻辑是否生效
+    let graffitiCount = 0;
+    worldGroup.traverse(o => { if (o.userData && o.userData.isGraffiti) graffitiCount++; });
+    document.getElementById('debug-graffiti').textContent = `涂鸦已加载: ${graffitiCount}`;
+  }
+
+  // ---------- 固定数量的真实光源池（性能关键） ----------
+  const lightPool = [];
+  for (let i=0;i<LIGHT_POOL_SIZE;i++){
+    const pl = new THREE.PointLight(0xfff2c0, 0, CELL*3.4, 2);
+    scene.add(pl);
+    lightPool.push({ light: pl, cx:null, cy:null, active:false });
+  }
+
+  function updateLightPool(ccx, ccz) {
+    const candidates = [];
+    const SEARCH_R = RENDER_RADIUS;
+    for (let dx=-SEARCH_R; dx<=SEARCH_R; dx++){
+      for (let dy=-SEARCH_R; dy<=SEARCH_R; dy++){
+        const cx = ccx+dx, cy = ccz+dy;
+        if (isLightCell(cx,cy)) {
+          candidates.push({ cx, cy, dist: dx*dx+dy*dy });
+        }
+      }
+    }
+    candidates.sort((a,b)=>a.dist-b.dist);
+    for (let i=0;i<LIGHT_POOL_SIZE;i++){
+      const entry = lightPool[i];
+      const c = candidates[i];
+      if (c) {
+        entry.cx = c.cx; entry.cy = c.cy; entry.active = true;
+        entry.light.position.set(c.cx*CELL, WALL_H-0.3, c.cy*CELL);
+      } else {
+        entry.active = false;
+        entry.light.intensity = 0;
+      }
+    }
+  }
+
+  // ---------- 环境光 ----------
+  const ambient = new THREE.AmbientLight(0x4a4318, 0.55);
+  scene.add(ambient);
+  const hemi = new THREE.HemisphereLight(0xd9c96a, 0x1a1508, 0.25);
+  scene.add(hemi);
+
+  updateWorld(0,0);
+
+  // ---------- 玩家移动与碰撞 ----------
+  const player = { x:0, z:0, yaw:0, pitch:0, speed:4.4, velX:0, velZ:0, bobPhase:0, breathPhase:0 };
+  const keys = {};
+  let pointerLocked = false;
+  let touchActive = false;
+  let lastChunkX = null, lastChunkZ = null;
+
+  const isTouchDevice = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+  if (isTouchDevice) {
+    document.getElementById('overlay-hint').textContent = '点击开始 · 左侧摇杆移动，右侧拖动环顾';
+  }
+
+  const overlayEl = document.getElementById('overlay');
+  overlayEl.addEventListener('click', () => {
+    startAudio(); // 必须在用户手势的同步调用链中创建/恢复 AudioContext
+    if (isTouchDevice) {
+      // 触屏设备：不依赖指针锁定（大多数移动浏览器不支持/体验差），直接开始游戏
+      touchActive = true;
+      overlayEl.style.opacity = '0';
+      overlayEl.style.pointerEvents = 'none';
+      document.getElementById('touch-joystick-zone').style.display = 'block';
+      document.getElementById('touch-look-zone').style.display = 'block';
+      document.getElementById('touch-hint').style.display = 'block';
+      document.getElementById('hud').style.display = 'none';
+      startClock();
+    } else {
+      renderer.domElement.requestPointerLock();
+    }
+  });
+
+  document.addEventListener('pointerlockchange', () => {
+    pointerLocked = document.pointerLockElement === renderer.domElement;
+    overlayEl.style.opacity = pointerLocked ? '0' : '1';
+    overlayEl.style.pointerEvents = pointerLocked ? 'none' : 'auto';
+    if (pointerLocked) {
+      startClock();
+    } else {
+      // 松开指针锁（比如按 ESC）时，清空移动状态，避免速度残留导致脚步声一直播放
+      for (const k in keys) keys[k] = false;
+      player.velX = 0;
+      player.velZ = 0;
+      setWalkingAudio(false);
+    }
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!pointerLocked) return;
+    player.yaw   -= e.movementX * 0.0022;
+    player.pitch -= e.movementY * 0.0022;
+    player.pitch = Math.max(-1.3, Math.min(1.3, player.pitch));
+  });
+
+  window.addEventListener('keydown', (e) => {
+    keys[e.code] = true;
+    if (e.code === 'KeyM') toggleMute();
+  });
+  window.addEventListener('keyup', (e) => { keys[e.code] = false; });
+
+  // ---------- 触屏控制：左侧虚拟摇杆（移动）+ 右侧拖动（环顾） ----------
+  const joystick = { touchId:null, baseX:0, baseY:0, moveX:0, moveY:0 };
+  const lookTouch = { touchId:null, lastX:0, lastY:0 };
+  const JOY_MAX_R = 46;
+
+  const joyZone = document.getElementById('touch-joystick-zone');
+  const joyKnob = document.getElementById('touch-joystick-knob');
+  const lookZone = document.getElementById('touch-look-zone');
+
+  joyZone.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    const t = e.changedTouches[0];
+    const rect = joyZone.getBoundingClientRect();
+    joystick.touchId = t.identifier;
+    joystick.baseX = rect.left + rect.width/2;
+    joystick.baseY = rect.top + rect.height/2;
+  }, { passive:false });
+
+  function updateJoystickFromTouch(t) {
+    let dx = t.clientX - joystick.baseX;
+    let dy = t.clientY - joystick.baseY;
+    const dist = Math.hypot(dx,dy);
+    if (dist > JOY_MAX_R) { dx = dx/dist*JOY_MAX_R; dy = dy/dist*JOY_MAX_R; }
+    joyKnob.style.left = (38+dx) + 'px';
+    joyKnob.style.top  = (38+dy) + 'px';
+    joystick.moveX = dx / JOY_MAX_R;      // 左右（strafe）
+    joystick.moveY = -dy / JOY_MAX_R;     // 前后（前推为正）
+  }
+  document.addEventListener('touchmove', (e) => {
+    for (const t of e.changedTouches) {
+      if (t.identifier === joystick.touchId) { e.preventDefault(); updateJoystickFromTouch(t); }
+      if (t.identifier === lookTouch.touchId) {
+        e.preventDefault();
+        const dx = t.clientX - lookTouch.lastX, dy = t.clientY - lookTouch.lastY;
+        lookTouch.lastX = t.clientX; lookTouch.lastY = t.clientY;
+        player.yaw   -= dx * 0.0035;
+        player.pitch -= dy * 0.0035;
+        player.pitch = Math.max(-1.3, Math.min(1.3, player.pitch));
+      }
+    }
+  }, { passive:false });
+  document.addEventListener('touchend', (e) => {
+    for (const t of e.changedTouches) {
+      if (t.identifier === joystick.touchId) {
+        joystick.touchId = null; joystick.moveX = 0; joystick.moveY = 0;
+        joyKnob.style.left = '38px'; joyKnob.style.top = '38px';
+      }
+      if (t.identifier === lookTouch.touchId) lookTouch.touchId = null;
+    }
+  });
+  lookZone.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    const t = e.changedTouches[0];
+    lookTouch.touchId = t.identifier;
+    lookTouch.lastX = t.clientX; lookTouch.lastY = t.clientY;
+  }, { passive:false });
+
+  function wallBlocksAt(x, z) {
+    const cx = Math.round(x/CELL), cz = Math.round(z/CELL);
+    for (let dx=-1; dx<=1; dx++){
+      for (let dz=-1; dz<=1; dz++){
+        const gx = cx+dx, gz = cz+dz;
+        const wx = gx*CELL, wz = gz*CELL;
+        const checks = [];
+        if (hasWall(gx,gz,0)) checks.push({x:wx, z:wz-CELL/2, w:INNER_WALL_LEN, d:WALL_T});
+        if (hasWall(gx,gz,2)) checks.push({x:wx, z:wz+CELL/2, w:INNER_WALL_LEN, d:WALL_T});
+        if (hasWall(gx,gz,3)) checks.push({x:wx-CELL/2, z:wz, w:WALL_T, d:INNER_WALL_LEN});
+        if (hasWall(gx,gz,1)) checks.push({x:wx+CELL/2, z:wz, w:WALL_T, d:INNER_WALL_LEN});
+        // 转角柱的碰撞（只在西北角真的有墙体交汇时才存在，需与建造逻辑保持一致）
+        const cornerNeeded =
+          hasWall(gx, gz, 0) || hasWall(gx, gz, 3) ||
+          hasWall(gx-1, gz, 0) || hasWall(gx, gz-1, 3);
+        if (cornerNeeded) checks.push({x:wx-CELL/2, z:wz-CELL/2, w:WALL_T, d:WALL_T});
+        for (const c of checks) {
+          if (Math.abs(x-c.x) < c.w/2 + 0.28 && Math.abs(z-c.z) < c.d/2 + 0.28) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  // ---------- 音频：真实录音文件 ----------
+  // 脚步声.aac：3秒/10次脚步，走动时循环播放；嗡鸣声.aac：10秒荧光灯嗡鸣，一直循环；
+  // 呼吸.aac：14秒/14次呼吸，一直循环。三个文件需与本 html 放在同一文件夹下。
+  const footstepAudio = new Audio('脚步声.aac');
+  const humAudio = new Audio('嗡鸣声.aac');
+  const breathAudio = new Audio('呼吸.aac');
+  footstepAudio.loop = true;
+  humAudio.loop = true;
+  breathAudio.loop = true;
+  footstepAudio.volume = 0.28;
+  humAudio.volume = 0.75;
+  breathAudio.volume = 0.32;
+  [footstepAudio, humAudio, breathAudio].forEach(a => {
+    a.addEventListener('error', () => {
+      console.warn('音频文件加载失败，请确认它与 html 文件放在同一文件夹：', a.src);
+    });
+  });
+
+  let muted = false, audioStarted = false, wasWalking = false;
+  function startAudio() {
+    if (audioStarted) return;
+    audioStarted = true;
+    // 必须在用户手势的同步调用链中触发 play()，否则会被浏览器自动播放策略拦截
+    humAudio.play().catch(e => console.warn('嗡鸣声播放失败', e));
+    breathAudio.play().catch(e => console.warn('呼吸声播放失败', e));
+  }
+  function toggleMute() {
+    muted = !muted;
+    footstepAudio.muted = muted;
+    humAudio.muted = muted;
+    breathAudio.muted = muted;
+    document.getElementById('buzz-toggle').textContent = muted ? '[M] 取消静音' : '[M] 静音音效';
+  }
+  function setWalkingAudio(isWalking) {
+    if (isWalking === wasWalking) return;
+    wasWalking = isWalking;
+    if (isWalking) {
+      footstepAudio.currentTime = 0;
+      footstepAudio.play().catch(e => console.warn('脚步声播放失败', e));
+    } else {
+      footstepAudio.pause();
+    }
+  }
+
+  // ---------- 计时 & 低语文字 ----------
+  let startTime = null, clockStarted = false;
+  function startClock() {
+    if (clockStarted) return;
+    clockStarted = true;
+    startTime = performance.now();
+  }
+  function updateClock() {
+    if (!startTime) return;
+    const s = Math.floor((performance.now()-startTime)/1000);
+    const mm = String(Math.floor(s/60)).padStart(2,'0');
+    const ss = String(s%60).padStart(2,'0');
+    document.getElementById('timeElapsed').textContent = `已徘徊 ${mm}:${ss}`;
+  }
+
+  const whispers = [
+    "……这里没有出口……",
+    "墙纸的味道，你还记得吗",
+    "灯光又暗了一下",
+    "你走过这里了",
+    "地毯是湿的",
+    "继续走，没有别的办法",
+    "嗡…………嗡…………",
+    "没有人会来找你"
+  ];
+  let lastWhisperTime = 0;
+  function maybeWhisper(t) {
+    if (t - lastWhisperTime > 14 + Math.random()*20) {
+      lastWhisperTime = t;
+      const el = document.getElementById('whisper');
+      el.textContent = whispers[Math.floor(Math.random()*whispers.length)];
+      el.style.opacity = 0.6;
+      setTimeout(()=>{ el.style.opacity = 0; }, 4200);
+    }
+  }
+
+  // ---------- 主循环 ----------
+  let lastT = performance.now();
+  let fpsAccum = 0, fpsCount = 0, fpsTimer = 0;
+  function animate() {
+    requestAnimationFrame(animate);
+    const now = performance.now();
+    const dt = Math.min(0.05, (now-lastT)/1000);
+    lastT = now;
+
+    if (pointerLocked || touchActive) {
+      let fwd = 0, strafe = 0;
+      if (keys['KeyW']||keys['ArrowUp'])    fwd += 1;
+      if (keys['KeyS']||keys['ArrowDown'])  fwd -= 1;
+      if (keys['KeyD']||keys['ArrowRight']) strafe += 1;
+      if (keys['KeyA']||keys['ArrowLeft'])  strafe -= 1;
+      // 叠加触屏摇杆输入（摇杆本身已经是 -1..1 的连续值，不需要额外归一化处理）
+      fwd += joystick.moveY;
+      strafe += joystick.moveX;
+      const inputLen = Math.hypot(fwd, strafe);
+      const hasInput = inputLen > 0.05;
+      if (hasInput && inputLen > 1) { fwd /= inputLen; strafe /= inputLen; }
+      const yaw = player.yaw;
+      const forwardX = -Math.sin(yaw), forwardZ = -Math.cos(yaw);
+      const rightX = Math.cos(yaw), rightZ = -Math.sin(yaw);
+      const targetVX = (forwardX*fwd + rightX*strafe) * player.speed;
+      const targetVZ = (forwardZ*fwd + rightZ*strafe) * player.speed;
+
+      // 平滑加速/减速：有输入时较快趋近目标速度，松手后缓慢衰减到 0，而不是瞬间停下
+      const smoothRate = hasInput ? 7.5 : 4.5;
+      const blend = 1 - Math.exp(-smoothRate * dt);
+      player.velX += (targetVX - player.velX) * blend;
+      player.velZ += (targetVZ - player.velZ) * blend;
+      if (Math.hypot(player.velX, player.velZ) < 0.002) { player.velX = 0; player.velZ = 0; }
+
+      const nx = player.x + player.velX * dt;
+      const nz = player.z + player.velZ * dt;
+      let blockedX = wallBlocksAt(nx, player.z);
+      let blockedZ = wallBlocksAt(player.x, nz);
+      if (!blockedX) player.x = nx; else player.velX = 0;
+      if (!blockedZ) player.z = nz; else player.velZ = 0;
+
+      const ccx = Math.round(player.x / CELL), ccz = Math.round(player.z / CELL);
+      if (ccx !== lastChunkX || ccz !== lastChunkZ) {
+        lastChunkX = ccx; lastChunkZ = ccz;
+        updateWorld(player.x, player.z);
+      }
+      updateClock();
+      maybeWhisper(now/1000);
+    }
+
+    // ---- 视角晃动：走路时的步伐起伏跟随脚步声音频播放进度，静止时是呼吸起伏 ----
+    const horizSpeed = Math.hypot(player.velX, player.velZ);
+    const moveFactor = Math.min(1, horizSpeed / player.speed); // 0=静止, 1=全速，平滑过渡
+    setWalkingAudio(horizSpeed > 0.25);
+    player.breathPhase += dt; // 呼吸晃动始终随时间推进
+
+    // 脚步声.aac 是 3 秒钟 10 次脚步，即每次落脚间隔 0.3 秒 => 每秒 10/3 次
+    // 脚步声.aac 是 3 秒钟 10 次脚步，即每次落脚间隔 0.3 秒 => 每秒 10/3 次
+    // 注意：下面用 abs(sin) 来做"落脚下沉"，而 abs(sin) 本身周期是 π 不是 2π（频率天然翻倍），
+    // 所以这里只乘 Math.PI（不是 2π），下沉频率才会与脚步声真实频率一致，不会变成两倍速。
+    const STEP_FREQ = 10 / 3;
+    const audioPhase = footstepAudio.currentTime * STEP_FREQ * Math.PI;
+    const walkBobY   = -Math.abs(Math.sin(audioPhase)) * 0.05 * moveFactor;
+    const walkSwayX  = Math.sin(audioPhase) * 0.022 * moveFactor;   // 左右脚交替的侧向摆动（每两步一个完整周期）
+    const walkRoll   = Math.sin(audioPhase) * 0.010 * moveFactor;
+    const breathBobY = Math.sin(player.breathPhase * 0.9) * 0.016 * (1 - moveFactor);
+    const breathRoll = Math.sin(player.breathPhase * 0.55) * 0.004 * (1 - moveFactor);
+
+    const camYaw = player.yaw;
+    const camRightX = Math.cos(camYaw), camRightZ = -Math.sin(camYaw);
+
+    camera.position.set(
+      player.x + camRightX * walkSwayX,
+      1.65 + walkBobY + breathBobY,
+      player.z + camRightZ * walkSwayX
+    );
+    camera.rotation.order = 'YXZ';
+    camera.rotation.y = player.yaw;
+    camera.rotation.x = player.pitch;
+    camera.rotation.z = walkRoll + breathRoll;
+
+    // 灯板视觉闪烁（不含真实光照运算，开销很低）
+    for (const p of panels) {
+      const t = now*0.001 + lightSeed(p.cx,p.cy);
+      const state = lightState(p.cx,p.cy);
+      let flicker;
+      if (state === 'steady') {
+        flicker = 1.0; // 稳定不闪
+      } else if (state === 'broken') {
+        flicker = (Math.sin(t*37.0) > 0.9) ? 1.0 : 0.12 + 0.05*Math.sin(t*5.0);
+      } else {
+        const jitter = 0.9 + 0.1*Math.sin(t*23.0) + 0.05*Math.sin(t*71.0);
+        const rareDip = (Math.sin(t*1.7 + lightSeed(p.cx,p.cy)) < -0.965) ? 0.25 : 1.0;
+        flicker = jitter * rareDip;
+      }
+      p.mesh.material.opacity = 0.5 + 0.5*flicker;
+    }
+
+    // 真实光源池闪烁（固定数量，光源总数不变，避免着色器重编译）
+    for (const entry of lightPool) {
+      if (!entry.active) continue;
+      const t = now*0.001 + lightSeed(entry.cx, entry.cy);
+      const state = lightState(entry.cx, entry.cy);
+      let flicker;
+      if (state === 'steady') {
+        flicker = 1.0;
+      } else if (state === 'broken') {
+        flicker = (Math.sin(t*37.0) > 0.9) ? 1.0 : 0.12 + 0.05*Math.sin(t*5.0);
+      } else {
+        const jitter = 0.9 + 0.1*Math.sin(t*23.0) + 0.05*Math.sin(t*71.0);
+        const rareDip = (Math.sin(t*1.7 + lightSeed(entry.cx,entry.cy)) < -0.965) ? 0.25 : 1.0;
+        flicker = jitter * rareDip;
+      }
+      entry.light.intensity = lightBaseIntensity(entry.cx, entry.cy) * flicker;
+    }
+
+    // 简易 FPS 显示
+    fpsCount++; fpsTimer += dt;
+    if (fpsTimer >= 0.5) {
+      document.getElementById('fps').textContent = Math.round(fpsCount/fpsTimer) + ' fps';
+      fpsCount = 0; fpsTimer = 0;
+    }
+
+    renderer.render(scene, camera);
+  }
+  animate();
+
+})();
+</script>
+</body>
+</html>
