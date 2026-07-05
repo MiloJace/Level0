@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>Level 0</title>
+<title>后室 · Level 0</title>
 <style>
   html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; font-family: "Courier New", monospace; }
   #canvas-holder { position:fixed; inset:0; }
@@ -513,26 +513,17 @@
   window.addEventListener('keyup', (e) => { keys[e.code] = false; });
 
   // ---------- 触屏控制：左侧虚拟摇杆（移动）+ 右侧拖动（环顾） ----------
-  const joystick = { touchId:null, baseX:0, baseY:0, moveX:0, moveY:0 };
-  const lookTouch = { touchId:null, lastX:0, lastY:0 };
+  const joystick = { pointerId:null, baseX:0, baseY:0, moveX:0, moveY:0 };
+  const lookTouch = { pointerId:null, lastX:0, lastY:0 };
   const JOY_MAX_R = 46;
 
   const joyZone = document.getElementById('touch-joystick-zone');
   const joyKnob = document.getElementById('touch-joystick-knob');
   const lookZone = document.getElementById('touch-look-zone');
 
-  joyZone.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    const t = e.changedTouches[0];
-    const rect = joyZone.getBoundingClientRect();
-    joystick.touchId = t.identifier;
-    joystick.baseX = rect.left + rect.width/2;
-    joystick.baseY = rect.top + rect.height/2;
-  }, { passive:false });
-
-  function updateJoystickFromTouch(t) {
-    let dx = t.clientX - joystick.baseX;
-    let dy = t.clientY - joystick.baseY;
+  function updateJoystickFromPoint(clientX, clientY) {
+    let dx = clientX - joystick.baseX;
+    let dy = clientY - joystick.baseY;
     const dist = Math.hypot(dx,dy);
     if (dist > JOY_MAX_R) { dx = dx/dist*JOY_MAX_R; dy = dy/dist*JOY_MAX_R; }
     joyKnob.style.left = (38+dx) + 'px';
@@ -540,34 +531,56 @@
     joystick.moveX = dx / JOY_MAX_R;      // 左右（strafe）
     joystick.moveY = -dy / JOY_MAX_R;     // 前后（前推为正）
   }
-  document.addEventListener('touchmove', (e) => {
-    for (const t of e.changedTouches) {
-      if (t.identifier === joystick.touchId) { e.preventDefault(); updateJoystickFromTouch(t); }
-      if (t.identifier === lookTouch.touchId) {
-        e.preventDefault();
-        const dx = t.clientX - lookTouch.lastX, dy = t.clientY - lookTouch.lastY;
-        lookTouch.lastX = t.clientX; lookTouch.lastY = t.clientY;
-        player.yaw   -= dx * 0.0035;
-        player.pitch -= dy * 0.0035;
-        player.pitch = Math.max(-1.3, Math.min(1.3, player.pitch));
-      }
-    }
-  }, { passive:false });
-  document.addEventListener('touchend', (e) => {
-    for (const t of e.changedTouches) {
-      if (t.identifier === joystick.touchId) {
-        joystick.touchId = null; joystick.moveX = 0; joystick.moveY = 0;
-        joyKnob.style.left = '38px'; joyKnob.style.top = '38px';
-      }
-      if (t.identifier === lookTouch.touchId) lookTouch.touchId = null;
-    }
-  });
-  lookZone.addEventListener('touchstart', (e) => {
+  function resetJoystick() {
+    joystick.pointerId = null; joystick.moveX = 0; joystick.moveY = 0;
+    joyKnob.style.left = '38px'; joyKnob.style.top = '38px';
+  }
+
+  // 用 Pointer Events（而不是原始 touch 事件）+ setPointerCapture：
+  // 手指按下后即使滑出摇杆的可视范围，移动/抬起事件依然会稳定地发给这个元素，
+  // 不会因为滑出边界而"丢手"、卡住不跟随。
+  joyZone.addEventListener('pointerdown', (e) => {
     e.preventDefault();
-    const t = e.changedTouches[0];
-    lookTouch.touchId = t.identifier;
-    lookTouch.lastX = t.clientX; lookTouch.lastY = t.clientY;
-  }, { passive:false });
+    joyZone.setPointerCapture(e.pointerId);
+    joystick.pointerId = e.pointerId;
+    const rect = joyZone.getBoundingClientRect();
+    joystick.baseX = rect.left + rect.width/2;
+    joystick.baseY = rect.top + rect.height/2;
+    updateJoystickFromPoint(e.clientX, e.clientY);
+  });
+  joyZone.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== joystick.pointerId) return;
+    e.preventDefault();
+    updateJoystickFromPoint(e.clientX, e.clientY);
+  });
+  function endJoystickPointer(e) {
+    if (e.pointerId !== joystick.pointerId) return;
+    resetJoystick();
+  }
+  joyZone.addEventListener('pointerup', endJoystickPointer);
+  joyZone.addEventListener('pointercancel', endJoystickPointer);
+
+  lookZone.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    lookZone.setPointerCapture(e.pointerId);
+    lookTouch.pointerId = e.pointerId;
+    lookTouch.lastX = e.clientX; lookTouch.lastY = e.clientY;
+  });
+  lookZone.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== lookTouch.pointerId) return;
+    e.preventDefault();
+    const dx = e.clientX - lookTouch.lastX, dy = e.clientY - lookTouch.lastY;
+    lookTouch.lastX = e.clientX; lookTouch.lastY = e.clientY;
+    player.yaw   -= dx * 0.0035;
+    player.pitch -= dy * 0.0035;
+    player.pitch = Math.max(-1.3, Math.min(1.3, player.pitch));
+  });
+  function endLookPointer(e) {
+    if (e.pointerId !== lookTouch.pointerId) return;
+    lookTouch.pointerId = null;
+  }
+  lookZone.addEventListener('pointerup', endLookPointer);
+  lookZone.addEventListener('pointercancel', endLookPointer);
 
   function wallBlocksAt(x, z) {
     const cx = Math.round(x/CELL), cz = Math.round(z/CELL);
@@ -593,48 +606,86 @@
     return false;
   }
 
-  // ---------- 音频：真实录音文件 ----------
+  // ---------- 音频：真实录音文件（改用 Web Audio API 统一混音） ----------
+  // 之所以不用多个独立的 <audio> 标签：不少手机浏览器（尤其 iOS Safari）对"同一次用户手势里
+  // 同时播放多个 <audio> 元素"限制很严，经常出现只有第一个能起播、后面的起不来或被后起播的
+  // 声音打断且不会自动恢复的问题。改成用一个 AudioContext + 多个 GainNode 混音，
+  // 所有声音本质上是同一条音频管线里的多路信号，不受"多媒体元素并发数"限制。
   // 脚步声.aac：3秒/10次脚步，走动时循环播放；嗡鸣声.aac：10秒荧光灯嗡鸣，一直循环；
   // 呼吸.aac：14秒/14次呼吸，一直循环。三个文件需与本 html 放在同一文件夹下。
-  const footstepAudio = new Audio('脚步声.aac');
-  const humAudio = new Audio('嗡鸣声.aac');
-  const breathAudio = new Audio('呼吸.aac');
-  footstepAudio.loop = true;
-  humAudio.loop = true;
-  breathAudio.loop = true;
-  footstepAudio.volume = 0.28;
-  humAudio.volume = 0.75;
-  breathAudio.volume = 0.32;
-  [footstepAudio, humAudio, breathAudio].forEach(a => {
-    a.addEventListener('error', () => {
-      console.warn('音频文件加载失败，请确认它与 html 文件放在同一文件夹：', a.src);
-    });
-  });
-
+  let audioCtx = null;
+  let humGain, breathGain, footstepGain;
+  let humBuffer = null, breathBuffer = null, footstepBuffer = null;
+  let footstepSource = null, footstepStartTime = 0;
   let muted = false, audioStarted = false, wasWalking = false;
-  function startAudio() {
-    if (audioStarted) return;
-    audioStarted = true;
-    // 必须在用户手势的同步调用链中触发 play()，否则会被浏览器自动播放策略拦截
-    humAudio.play().catch(e => console.warn('嗡鸣声播放失败', e));
-    breathAudio.play().catch(e => console.warn('呼吸声播放失败', e));
+
+  async function loadAudioBuffer(url) {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const arrBuf = await resp.arrayBuffer();
+    return await audioCtx.decodeAudioData(arrBuf);
   }
+
+  function playLoop(buffer, gainNode) {
+    const src = audioCtx.createBufferSource();
+    src.buffer = buffer;
+    src.loop = true;
+    src.connect(gainNode);
+    src.start(0);
+    return src;
+  }
+
+  function startAudio() {
+    if (audioStarted) {
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+      return;
+    }
+    audioStarted = true;
+    // AudioContext 必须在用户手势的同步调用链里创建/恢复，否则会被浏览器自动播放策略拦截
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    humGain = audioCtx.createGain();      humGain.gain.value = 0.75;
+    breathGain = audioCtx.createGain();   breathGain.gain.value = 0.32;
+    footstepGain = audioCtx.createGain(); footstepGain.gain.value = 0.28;
+    humGain.connect(audioCtx.destination);
+    breathGain.connect(audioCtx.destination);
+    footstepGain.connect(audioCtx.destination);
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+
+    loadAudioBuffer('嗡鸣声.aac').then(buf => { humBuffer = buf; playLoop(humBuffer, humGain); })
+      .catch(e => console.warn('嗡鸣声加载/播放失败，请确认它与 html 文件放在同一文件夹：', e));
+    loadAudioBuffer('呼吸.aac').then(buf => { breathBuffer = buf; playLoop(breathBuffer, breathGain); })
+      .catch(e => console.warn('呼吸声加载/播放失败，请确认它与 html 文件放在同一文件夹：', e));
+    loadAudioBuffer('脚步声.aac').then(buf => { footstepBuffer = buf; }) // 脚步声只在走动时才触发播放
+      .catch(e => console.warn('脚步声加载失败，请确认它与 html 文件放在同一文件夹：', e));
+  }
+
   function toggleMute() {
     muted = !muted;
-    footstepAudio.muted = muted;
-    humAudio.muted = muted;
-    breathAudio.muted = muted;
+    if (humGain) humGain.gain.value = muted ? 0 : 0.75;
+    if (breathGain) breathGain.gain.value = muted ? 0 : 0.32;
+    if (footstepGain) footstepGain.gain.value = muted ? 0 : 0.28;
     document.getElementById('buzz-toggle').textContent = muted ? '[M] 取消静音' : '[M] 静音音效';
   }
+
   function setWalkingAudio(isWalking) {
     if (isWalking === wasWalking) return;
     wasWalking = isWalking;
     if (isWalking) {
-      footstepAudio.currentTime = 0;
-      footstepAudio.play().catch(e => console.warn('脚步声播放失败', e));
-    } else {
-      footstepAudio.pause();
+      if (!footstepBuffer || !audioCtx) return; // 还没加载完成就先不管，下次移动再触发
+      if (footstepSource) { try { footstepSource.stop(); } catch(e) {} }
+      footstepSource = playLoop(footstepBuffer, footstepGain);
+      footstepStartTime = audioCtx.currentTime;
+    } else if (footstepSource) {
+      try { footstepSource.stop(); } catch(e) {}
+      footstepSource = null;
     }
+  }
+
+  // 模拟出一个和 HTMLMediaElement.currentTime 等价的量，供视角晃动读取脚步声播放进度
+  function getFootstepTime() {
+    if (!footstepSource || !footstepBuffer || !audioCtx) return 0;
+    const elapsed = audioCtx.currentTime - footstepStartTime;
+    return elapsed % footstepBuffer.duration;
   }
 
   // ---------- 计时 & 低语文字 ----------
@@ -734,7 +785,7 @@
     // 注意：下面用 abs(sin) 来做"落脚下沉"，而 abs(sin) 本身周期是 π 不是 2π（频率天然翻倍），
     // 所以这里只乘 Math.PI（不是 2π），下沉频率才会与脚步声真实频率一致，不会变成两倍速。
     const STEP_FREQ = 10 / 3;
-    const audioPhase = footstepAudio.currentTime * STEP_FREQ * Math.PI;
+    const audioPhase = getFootstepTime() * STEP_FREQ * Math.PI;
     const walkBobY   = -Math.abs(Math.sin(audioPhase)) * 0.05 * moveFactor;
     const walkSwayX  = Math.sin(audioPhase) * 0.022 * moveFactor;   // 左右脚交替的侧向摆动（每两步一个完整周期）
     const walkRoll   = Math.sin(audioPhase) * 0.010 * moveFactor;
