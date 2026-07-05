@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>Level 0</title>
+<title>后室 · Level 0</title>
 <style>
   html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; font-family: "Courier New", monospace; }
   #canvas-holder { position:fixed; inset:0; }
@@ -74,12 +74,30 @@
     color:rgba(217,201,106,0.4); font-size:11px; letter-spacing:0.1em; z-index:15;
     pointer-events:none; user-select:none; white-space:nowrap;
   }
+  #touch-run-toggle {
+    display:none; position:fixed; right:26px; bottom:30px; width:64px; height:64px; z-index:16;
+    border-radius:50%; background:rgba(217,201,106,0.12); border:1px solid rgba(217,201,106,0.35);
+    color:rgba(217,201,106,0.7); font-size:15px; letter-spacing:0.05em;
+    align-items:center; justify-content:center; user-select:none; touch-action:manipulation;
+  }
+  #touch-run-toggle.running {
+    background:rgba(217,80,60,0.28); border-color:rgba(217,110,80,0.6); color:#ffdcd0;
+  }
+  #caught-overlay {
+    display:none; position:fixed; inset:0; z-index:30;
+    background:radial-gradient(ellipse at center, rgba(90,10,10,0.92) 0%, rgba(10,0,0,0.98) 80%);
+    color:#ffdede; text-align:center; flex-direction:column; align-items:center; justify-content:center;
+    font-family:"Courier New", monospace; cursor:pointer;
+  }
+  #caught-overlay h1 { font-size:2.4em; letter-spacing:0.3em; font-weight:400; margin:0 0 0.4em 0; }
+  #caught-overlay p { opacity:0.75; margin:0.3em 0; font-size:0.95em; }
+  #caught-overlay .tap-hint { margin-top:1.6em; opacity:0.5; font-size:0.85em; }
 </style>
 </head>
 <body>
 <div id="canvas-holder"></div>
 <div id="vignette"></div>
-<div id="hud">WASD / 方向键 移动 &nbsp;·&nbsp; 鼠标 环顾 &nbsp;·&nbsp; ESC 释放光标</div>
+<div id="hud">WASD / 方向键 移动 &nbsp;·&nbsp; Shift+W 奔跑 &nbsp;·&nbsp; 鼠标 环顾 &nbsp;·&nbsp; ESC 释放光标</div>
 <div id="timeElapsed">已徘徊 00:00</div>
 <div id="fps"></div>
 <div id="debug-graffiti" style="position:fixed; left:14px; top:28px; color:rgba(217,201,106,0.25); font-size:10px; letter-spacing:0.1em; z-index:10; pointer-events:none; user-select:none;"></div>
@@ -92,13 +110,20 @@
   <div id="touch-joystick-knob"></div>
 </div>
 <div id="touch-look-zone"></div>
-<div id="touch-hint">左侧摇杆移动 · 右侧拖动环顾四周</div>
+<div id="touch-hint">左侧摇杆移动 · 右侧拖动环顾 · 右下角切换走/跑</div>
+<div id="touch-run-toggle">走</div>
+
+<div id="caught-overlay">
+  <h1>找 到 你 了</h1>
+  <p id="caught-time"></p>
+  <p class="tap-hint">点击重新开始</p>
+</div>
 
 <div id="overlay">
   <h1>后&nbsp;室</h1>
   <p>LEVEL&nbsp;0&nbsp;—&nbsp;"无尽的房间"</p>
   <p>发霉的黄色壁纸，潮湿的地毯，<br>荧光灯永不停息地嗡鸣与闪烁。</p>
-  <p class="blink">如果你不够小心，就会被"没顶"到这里。<br>没有怪物，只有空间本身。</p>
+  <p class="blink">如果你不够小心，就会被"没顶"到这里。<br>而且，你可能不是一个人在这里。</p>
   <p id="overlay-hint" style="margin-top:1.6em; opacity:0.55; font-size:0.85em;">点击开始 · 你将永远走不出去</p>
 </div>
 
@@ -455,15 +480,18 @@
   updateWorld(0,0);
 
   // ---------- 玩家移动与碰撞 ----------
-  const player = { x:0, z:0, yaw:0, pitch:0, speed:4.4, velX:0, velZ:0, bobPhase:0, breathPhase:0 };
+  const WALK_SPEED = 3.2;
+  const RUN_SPEED = 5.6;
+  const player = { x:0, z:0, yaw:0, pitch:0, speed:WALK_SPEED, velX:0, velZ:0, bobPhase:0, breathPhase:0 };
   const keys = {};
   let pointerLocked = false;
   let touchActive = false;
+  let touchRunMode = false; // 触屏端：走/跑切换（不是按住，是点一下切换状态）
   let lastChunkX = null, lastChunkZ = null;
 
   const isTouchDevice = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
   if (isTouchDevice) {
-    document.getElementById('overlay-hint').textContent = '点击开始 · 左侧摇杆移动，右侧拖动环顾';
+    document.getElementById('overlay-hint').textContent = '点击开始 · 左侧摇杆移动，右侧拖动环顾，右下角切换走/跑';
   }
 
   const overlayEl = document.getElementById('overlay');
@@ -477,6 +505,7 @@
       document.getElementById('touch-joystick-zone').style.display = 'block';
       document.getElementById('touch-look-zone').style.display = 'block';
       document.getElementById('touch-hint').style.display = 'block';
+      document.getElementById('touch-run-toggle').style.display = 'flex';
       document.getElementById('hud').style.display = 'none';
       startClock();
     } else {
@@ -518,6 +547,13 @@
   const JOY_MAX_R = 46;
 
   const joyZone = document.getElementById('touch-joystick-zone');
+  const runToggleBtn = document.getElementById('touch-run-toggle');
+  runToggleBtn.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    touchRunMode = !touchRunMode;
+    runToggleBtn.textContent = touchRunMode ? '跑' : '走';
+    runToggleBtn.classList.toggle('running', touchRunMode);
+  });
   const joyKnob = document.getElementById('touch-joystick-knob');
   const lookZone = document.getElementById('touch-look-zone');
 
@@ -641,6 +677,66 @@
     return false;
   }
 
+  // ---------- 追逐怪物：2D 贴图（billboard），高度与房间等高，会一路寻着玩家追过来 ----------
+  const monsterTex = new THREE.TextureLoader().load(
+    'monster.png', undefined, undefined,
+    () => console.warn('怪物贴图加载失败，请确认 monster.png 与 html 文件放在同一文件夹')
+  );
+  const MONSTER_HEIGHT = WALL_H;              // 高度与房间一样高
+  const MONSTER_WIDTH  = MONSTER_HEIGHT;      // 贴图接近正方形，宽度与高度同比例
+  const MONSTER_SPEED  = 3.6;                 // 比正常步行快、比奔跑慢——逼玩家不得不按 shift 冲刺
+  const CATCH_DIST     = 1.1;
+  const MONSTER_SPAWN_DIST = 20;              // 与玩家出生点的初始距离
+
+  const monsterMat = new THREE.MeshBasicMaterial({
+    map: monsterTex, transparent: true, alphaTest: 0.05, side: THREE.DoubleSide
+  });
+  const monsterGeo = new THREE.PlaneGeometry(MONSTER_WIDTH, MONSTER_HEIGHT);
+  const monsterMesh = new THREE.Mesh(monsterGeo, monsterMat);
+  scene.add(monsterMesh);
+
+  const monster = { x:0, z:0, active:false };
+  function spawnMonster(px, pz) {
+    const angle = Math.random() * Math.PI * 2;
+    monster.x = px + Math.sin(angle) * MONSTER_SPAWN_DIST;
+    monster.z = pz + Math.cos(angle) * MONSTER_SPAWN_DIST;
+    monster.active = true;
+  }
+
+  let caught = false;
+  function triggerCaught() {
+    if (caught) return;
+    caught = true;
+    if (document.pointerLockElement) document.exitPointerLock();
+    setWalkingAudio(false);
+    const s = startTime ? Math.floor((performance.now()-startTime)/1000) : 0;
+    const mm = String(Math.floor(s/60)).padStart(2,'0');
+    const ss = String(s%60).padStart(2,'0');
+    document.getElementById('caught-time').textContent = `你在后室里徘徊了 ${mm}:${ss}`;
+    const co = document.getElementById('caught-overlay');
+    co.style.display = 'flex';
+    co.addEventListener('click', () => location.reload(), { once:true });
+  }
+
+  function updateMonster(dt, playerX, playerZ) {
+    if (!monster.active || caught) return;
+    const dx = playerX - monster.x, dz = playerZ - monster.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist > 0.001) {
+      const nx = dx/dist, nz = dz/dist;
+      const mx = monster.x + nx*MONSTER_SPEED*dt;
+      const mz = monster.z + nz*MONSTER_SPEED*dt;
+      if (!wallBlocksAt(mx, monster.z)) monster.x = mx;
+      if (!wallBlocksAt(monster.x, mz)) monster.z = mz;
+    }
+    monsterMesh.position.set(monster.x, MONSTER_HEIGHT/2, monster.z);
+    // 只做水平方向的 billboard（贴图始终立着面朝玩家，不会因为抬头低头而跟着诡异倾斜）
+    const bx = camera.position.x - monster.x, bz = camera.position.z - monster.z;
+    monsterMesh.rotation.y = Math.atan2(bx, bz);
+    if (dist < CATCH_DIST) triggerCaught();
+  }
+
+
   // ---------- 音频：真实录音文件（优先 Web Audio 统一混音，失败则自动回退到普通 <audio> 播放） ----------
   // 之所以优先用 Web Audio：不少手机浏览器（尤其 iOS Safari）对"同一次用户手势里同时播放多个
   // <audio> 元素"限制很严，容易出现只有第一个能起播、后面被打断且不会自动恢复的问题；
@@ -730,12 +826,23 @@
     document.getElementById('buzz-toggle').textContent = muted ? '[M] 取消静音' : '[M] 静音音效';
   }
 
-  function setWalkingAudio(isWalking) {
-    if (isWalking === wasWalking) return;
+  let footstepRate = 1.0;
+  function setWalkingAudio(isWalking, isRunningNow) {
+    if (isWalking === wasWalking) {
+      // 已经在走/跑，但可能中途在走和跑之间切换了——同步一下播放速率
+      updateFootstepRate(isRunningNow);
+      return;
+    }
     wasWalking = isWalking;
+    const rate = isRunningNow ? 1.55 : 1.0;
+    footstepRate = rate;
     if (usingFallbackAudio) {
       if (isWalking) {
-        if (fbFootstep) { fbFootstep.currentTime = 0; fbFootstep.play().catch(e => console.warn('脚步声播放失败（兼容模式）', e)); }
+        if (fbFootstep) {
+          fbFootstep.playbackRate = rate;
+          fbFootstep.currentTime = 0;
+          fbFootstep.play().catch(e => console.warn('脚步声播放失败（兼容模式）', e));
+        }
       } else if (fbFootstep) {
         fbFootstep.pause();
       }
@@ -745,11 +852,25 @@
       if (!footstepBuffer || !audioCtx) return; // 还没加载完成就先不管，下次移动再触发
       if (footstepSource) { try { footstepSource.stop(); } catch(e) {} }
       footstepSource = playLoop(footstepBuffer, footstepGain);
+      footstepSource.playbackRate.value = rate;
       footstepStartTime = audioCtx.currentTime;
     } else if (footstepSource) {
       try { footstepSource.stop(); } catch(e) {}
       footstepSource = null;
     }
+  }
+  function updateFootstepRate(isRunningNow) {
+    const rate = isRunningNow ? 1.55 : 1.0;
+    if (rate === footstepRate) return;
+    if (!usingFallbackAudio && footstepSource && audioCtx && footstepBuffer) {
+      // 变速时重新校准起播时间戳，避免视角晃动的相位突然跳一下
+      const oldElapsed = audioCtx.currentTime - footstepStartTime;
+      const oldPhasePos = (oldElapsed * footstepRate) % footstepBuffer.duration;
+      footstepStartTime = audioCtx.currentTime - oldPhasePos / rate;
+      footstepSource.playbackRate.value = rate;
+    }
+    footstepRate = rate;
+    if (usingFallbackAudio && fbFootstep) fbFootstep.playbackRate = rate;
   }
 
   // 模拟出一个和 HTMLMediaElement.currentTime 等价的量，供视角晃动读取脚步声播放进度
@@ -757,7 +878,7 @@
     if (usingFallbackAudio) return fbFootstep ? fbFootstep.currentTime : 0;
     if (!footstepSource || !footstepBuffer || !audioCtx) return 0;
     const elapsed = audioCtx.currentTime - footstepStartTime;
-    return elapsed % footstepBuffer.duration;
+    return (elapsed * footstepRate) % footstepBuffer.duration;
   }
 
   // ---------- 计时 & 低语文字 ----------
@@ -766,6 +887,7 @@
     if (clockStarted) return;
     clockStarted = true;
     startTime = performance.now();
+    spawnMonster(player.x, player.z);
   }
   function updateClock() {
     if (!startTime) return;
@@ -805,7 +927,8 @@
     const dt = Math.min(0.05, (now-lastT)/1000);
     lastT = now;
 
-    if (pointerLocked || touchActive) {
+    let isRunning = false;
+    if ((pointerLocked || touchActive) && !caught) {
       let fwd = 0, strafe = 0;
       if (keys['KeyW']||keys['ArrowUp'])    fwd += 1;
       if (keys['KeyS']||keys['ArrowDown'])  fwd -= 1;
@@ -817,6 +940,12 @@
       const inputLen = Math.hypot(fwd, strafe);
       const hasInput = inputLen > 0.05;
       if (hasInput && inputLen > 1) { fwd /= inputLen; strafe /= inputLen; }
+
+      // 奔跑判定：键鼠端要按住 shift 且同时按着 W／↑ 才算奔跑；触屏端是单击切换的开关
+      const keyboardSprint = (keys['ShiftLeft']||keys['ShiftRight']) && (keys['KeyW']||keys['ArrowUp']);
+      isRunning = pointerLocked ? keyboardSprint : touchRunMode;
+      player.speed = isRunning ? RUN_SPEED : WALK_SPEED;
+
       const yaw = player.yaw;
       const forwardX = -Math.sin(yaw), forwardZ = -Math.cos(yaw);
       const rightX = Math.cos(yaw), rightZ = -Math.sin(yaw);
@@ -844,15 +973,15 @@
       }
       updateClock();
       maybeWhisper(now/1000);
+      updateMonster(dt, player.x, player.z);
     }
 
     // ---- 视角晃动：走路时的步伐起伏跟随脚步声音频播放进度，静止时是呼吸起伏 ----
     const horizSpeed = Math.hypot(player.velX, player.velZ);
     const moveFactor = Math.min(1, horizSpeed / player.speed); // 0=静止, 1=全速，平滑过渡
-    setWalkingAudio(horizSpeed > 0.25);
+    setWalkingAudio(horizSpeed > 0.25, isRunning);
     player.breathPhase += dt; // 呼吸晃动始终随时间推进
 
-    // 脚步声.aac 是 3 秒钟 10 次脚步，即每次落脚间隔 0.3 秒 => 每秒 10/3 次
     // 脚步声.aac 是 3 秒钟 10 次脚步，即每次落脚间隔 0.3 秒 => 每秒 10/3 次
     // 注意：下面用 abs(sin) 来做"落脚下沉"，而 abs(sin) 本身周期是 π 不是 2π（频率天然翻倍），
     // 所以这里只乘 Math.PI（不是 2π），下沉频率才会与脚步声真实频率一致，不会变成两倍速。
