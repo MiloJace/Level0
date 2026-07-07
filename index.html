@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>Level 0</title>
+<title>后室 · Level 0</title>
 <style>
   html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; font-family: "Courier New", monospace; }
   #canvas-holder { position:fixed; inset:0; }
@@ -135,10 +135,10 @@
   // ---------- 基础场景 ----------
   const scene = new THREE.Scene();
   const FOG_COLOR = 0x8f7a35; // 发霉的黄色调，取代默认黑色背景
-  scene.fog = new THREE.FogExp2(FOG_COLOR, 0.032);
+  scene.fog = new THREE.FogExp2(FOG_COLOR, 0.022);
   scene.background = new THREE.Color(FOG_COLOR);
 
-  const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.05, 70);
+  const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.05, 95);
   camera.position.set(0, 1.65, 0);
 
   const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:"high-performance" });
@@ -231,48 +231,6 @@
 
   // 用 MeshLambertMaterial 替代 MeshStandardMaterial：省去逐像素 PBR 计算，帧率更稳
   const wallMat = new THREE.MeshLambertMaterial({ map: wallpaperTex });
-
-  // ---------- 涂鸦贴图（透明背景 PNG，需与本 html 放在同一文件夹）----------
-  const GRAFFITI_FILES = [
-    "Are you here.png", "Smile.png", "See You.png",
-    "God Bless You.png", "I hate you.png", "Where are u.png"
-  ];
-  const textureLoader = new THREE.TextureLoader();
-  const graffitiTextures = GRAFFITI_FILES.map(name => textureLoader.load(
-    name, undefined, undefined,
-    () => console.warn('涂鸦贴图加载失败，请确认它与 html 文件放在同一文件夹：', name)
-  ));
-  const GRAFFITI_PROB = 0.10;
-
-  function maybeAddGraffiti(group, dir, wx, wz) {
-    if (Math.random() > GRAFFITI_PROB) return;
-    const tex = graffitiTextures[Math.floor(Math.random()*graffitiTextures.length)];
-    const w = 0.8 + Math.random()*0.5;
-    const h = w * (0.55 + Math.random()*0.35);
-    // 透明背景贴图：不写深度，避免和墙体产生 z-fighting 闪烁；alphaTest 裁掉透明部分的黑边
-    const mat = new THREE.MeshBasicMaterial({
-      map: tex, transparent: true, alphaTest: 0.05, depthWrite: false, side: THREE.FrontSide
-    });
-    const geo = new THREE.PlaneGeometry(w, h);
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.userData.isGraffiti = true;
-    const yPos = 1.1 + Math.random()*1.2;
-    const along = (Math.random()-0.5) * Math.max(0, INNER_WALL_LEN - w - 0.2);
-    const eps = 0.03; // 贴图相对墙面略微前移，避免与墙体贴图共面闪烁
-    if (dir === 0) { // 北墙，朝向室内（+Z）
-      mesh.position.set(wx + along, yPos, wz - CELL/2 + WALL_T/2 + eps);
-    } else if (dir === 2) { // 南墙，朝向室内（-Z）
-      mesh.rotation.y = Math.PI;
-      mesh.position.set(wx + along, yPos, wz + CELL/2 - WALL_T/2 - eps);
-    } else if (dir === 3) { // 西墙，朝向室内（+X）
-      mesh.rotation.y = Math.PI/2;
-      mesh.position.set(wx - CELL/2 + WALL_T/2 + eps, yPos, wz + along);
-    } else if (dir === 1) { // 东墙，朝向室内（-X）
-      mesh.rotation.y = -Math.PI/2;
-      mesh.position.set(wx + CELL/2 - WALL_T/2 - eps, yPos, wz + along);
-    }
-    group.add(mesh);
-  }
   const floorMat = new THREE.MeshLambertMaterial({ map: carpetTex });
   const ceilMat = new THREE.MeshLambertMaterial({ map: ceilingTex });
 
@@ -280,7 +238,7 @@
   const CELL = 4;
   const WALL_H = 3.6;
   const WALL_T = 0.5;
-  const RENDER_RADIUS = 9;   // 加大渲染半径，视野更远（配合固定光源池与共享几何体，性能仍可控）
+  const RENDER_RADIUS = 13;   // 进一步加大渲染半径，视野更远
   const LIGHT_POOL_SIZE = 8; // 固定数量的真实光源，避免运行时改变光源总数导致着色器重新编译
 
   function hash2(x, y) {
@@ -321,6 +279,99 @@
   const floorGeo = new THREE.PlaneGeometry(CELL, CELL);
   const ceilGeo = new THREE.PlaneGeometry(CELL, CELL);
   const SHARED_GEOS = new Set([wallGeo, cornerPostGeo, pillarLightGeo, floorGeo, ceilGeo]);
+  const SHARED_MATS = new Set([wallMat, floorMat, ceilMat]);
+
+  // ---------- 涂鸦贴图（透明背景 PNG，按原始宽高比铺满整面墙，需与本 html 放在同一文件夹）----------
+  // 每张图的原始 宽/高 比例提前量好写死，不用等图片异步加载完才知道尺寸
+  // （buildCell 是同步执行的，没法等 Image.onload）。
+  const GRAFFITI_FILES = [
+    { name: "Are you here.png",   aspect: 1065/619 },
+    { name: "Smile.png",          aspect: 514/664  },
+    { name: "See You.png",        aspect: 514/664  },
+    { name: "God Bless You.png",  aspect: 514/664  },
+    { name: "I hate you.png",     aspect: 1416/664 },
+    { name: "Where are u.png",    aspect: 1416/664 }
+  ];
+  const textureLoader = new THREE.TextureLoader();
+  const GRAFFITI_MAX_W = INNER_WALL_LEN - 0.15; // 留一点边距，避免正好卡到角柱边缘
+  const GRAFFITI_MAX_H = WALL_H - 0.3;          // 上下留一点空隙，不完全顶到地板/天花板
+
+  // 每张图的材质、几何体都只算一次、共享给所有出现的位置——不管这张涂鸦在墙上出现几十次，
+  // 都只有一份 geometry/material，不会因为涂鸦数量变多而增加内存或材质切换开销。
+  const graffitiAssets = GRAFFITI_FILES.map(({ name, aspect }) => {
+    const tex = textureLoader.load(
+      name, undefined, undefined,
+      () => console.warn('涂鸦贴图加载失败，请确认它与 html 文件放在同一文件夹：', name)
+    );
+    // "contain" 式等比缩放：在不超出墙面宽/高的前提下尽量铺满
+    let w = GRAFFITI_MAX_W, h = w / aspect;
+    if (h > GRAFFITI_MAX_H) { h = GRAFFITI_MAX_H; w = h * aspect; }
+    const mat = new THREE.MeshBasicMaterial({
+      map: tex, transparent: true, alphaTest: 0.05, depthWrite: false, side: THREE.FrontSide
+    });
+    const geo = new THREE.PlaneGeometry(w, h);
+    SHARED_GEOS.add(geo);   // 共享几何体，卸载格子时不能被 dispose 掉
+    SHARED_MATS.add(mat);   // 共享材质，同理
+    return { mat, geo };
+  });
+  const GRAFFITI_PROB = 0.10;
+
+  function maybeAddGraffiti(group, dir, wx, wz) {
+    if (Math.random() > GRAFFITI_PROB) return;
+    const asset = graffitiAssets[Math.floor(Math.random()*graffitiAssets.length)];
+    const mesh = new THREE.Mesh(asset.geo, asset.mat);
+    mesh.userData.isGraffiti = true;
+    const yPos = WALL_H / 2; // 垂直居中铺满
+    const eps = 0.03; // 贴图相对墙面略微前移，避免与墙体贴图共面闪烁
+    if (dir === 0) { // 北墙，朝向室内（+Z）
+      mesh.position.set(wx, yPos, wz - CELL/2 + WALL_T/2 + eps);
+    } else if (dir === 2) { // 南墙，朝向室内（-Z）
+      mesh.rotation.y = Math.PI;
+      mesh.position.set(wx, yPos, wz + CELL/2 - WALL_T/2 - eps);
+    } else if (dir === 3) { // 西墙，朝向室内（+X）
+      mesh.rotation.y = Math.PI/2;
+      mesh.position.set(wx - CELL/2 + WALL_T/2 + eps, yPos, wz);
+    } else if (dir === 1) { // 东墙，朝向室内（-X）
+      mesh.rotation.y = -Math.PI/2;
+      mesh.position.set(wx + CELL/2 - WALL_T/2 - eps, yPos, wz);
+    }
+    group.add(mesh);
+  }
+
+  // 渲染优化：把同一个格子里用同一种材质（wallMat）的墙面 + 角柱手动合并成一个 BufferGeometry，
+  // 一个格子最多可能有 4 面墙 + 1 根角柱＝5 个独立 mesh，合并后只剩 1 个 draw call。
+  // 手写合并（不依赖 BufferGeometryUtils 插件），只需要处理 position / normal / uv 三个属性。
+  const _mergeV = new THREE.Vector3();
+  const _mergeN = new THREE.Vector3();
+  const _mergeNormalMat = new THREE.Matrix3();
+  function mergeBoxEntries(entries) {
+    const positions = [], normals = [], uvs = [], indices = [];
+    let vertexOffset = 0;
+    for (const { geometry, matrix } of entries) {
+      _mergeNormalMat.getNormalMatrix(matrix);
+      const posAttr = geometry.attributes.position;
+      const norAttr = geometry.attributes.normal;
+      const uvAttr = geometry.attributes.uv;
+      const idx = geometry.index;
+      for (let i = 0; i < posAttr.count; i++) {
+        _mergeV.fromBufferAttribute(posAttr, i).applyMatrix4(matrix);
+        positions.push(_mergeV.x, _mergeV.y, _mergeV.z);
+        _mergeN.fromBufferAttribute(norAttr, i).applyMatrix3(_mergeNormalMat).normalize();
+        normals.push(_mergeN.x, _mergeN.y, _mergeN.z);
+        uvs.push(uvAttr.getX(i), uvAttr.getY(i));
+      }
+      for (let i = 0; i < idx.count; i++) indices.push(idx.getX(i) + vertexOffset);
+      vertexOffset += posAttr.count;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    geo.setIndex(indices);
+    return geo;
+  }
+  function translationMatrix(x,y,z) { return new THREE.Matrix4().makeTranslation(x,y,z); }
+  function rotYMatrix(x,y,z,angle) { const m = new THREE.Matrix4().makeRotationY(angle); m.setPosition(x,y,z); return m; }
 
   // ---------- 分块渲染世界 ----------
   const worldGroup = new THREE.Group();
@@ -344,30 +395,21 @@
     ceil.position.set(wx, WALL_H, wz);
     group.add(ceil);
 
+    const wallEntries = [];
     if (hasWall(cx,cy,0)) {
-      const m = new THREE.Mesh(wallGeo, wallMat);
-      m.position.set(wx, WALL_H/2, wz - CELL/2);
-      group.add(m);
+      wallEntries.push({ geometry: wallGeo, matrix: translationMatrix(wx, WALL_H/2, wz - CELL/2) });
       maybeAddGraffiti(group, 0, wx, wz);
     }
     if (hasWall(cx,cy,3)) {
-      const m = new THREE.Mesh(wallGeo, wallMat);
-      m.rotation.y = Math.PI/2;
-      m.position.set(wx - CELL/2, WALL_H/2, wz);
-      group.add(m);
+      wallEntries.push({ geometry: wallGeo, matrix: rotYMatrix(wx - CELL/2, WALL_H/2, wz, Math.PI/2) });
       maybeAddGraffiti(group, 3, wx, wz);
     }
     if (hasWall(cx,cy,1)) {
-      const m = new THREE.Mesh(wallGeo, wallMat);
-      m.rotation.y = Math.PI/2;
-      m.position.set(wx + CELL/2, WALL_H/2, wz);
-      group.add(m);
+      wallEntries.push({ geometry: wallGeo, matrix: rotYMatrix(wx + CELL/2, WALL_H/2, wz, Math.PI/2) });
       maybeAddGraffiti(group, 1, wx, wz);
     }
     if (hasWall(cx,cy,2)) {
-      const m = new THREE.Mesh(wallGeo, wallMat);
-      m.position.set(wx, WALL_H/2, wz + CELL/2);
-      group.add(m);
+      wallEntries.push({ geometry: wallGeo, matrix: translationMatrix(wx, WALL_H/2, wz + CELL/2) });
       maybeAddGraffiti(group, 2, wx, wz);
     }
 
@@ -378,9 +420,14 @@
       hasWall(cx, cy, 0) || hasWall(cx, cy, 3) ||
       hasWall(cx-1, cy, 0) || hasWall(cx, cy-1, 3);
     if (cornerNeeded) {
-      const post = new THREE.Mesh(cornerPostGeo, wallMat);
-      post.position.set(wx - CELL/2, WALL_H/2, wz - CELL/2);
-      group.add(post);
+      wallEntries.push({ geometry: cornerPostGeo, matrix: translationMatrix(wx - CELL/2, WALL_H/2, wz - CELL/2) });
+    }
+
+    // 合并这个格子里所有共用 wallMat 的墙面 + 角柱，一次性变成一个 mesh / 一次 draw call
+    if (wallEntries.length > 0) {
+      const mergedWallGeo = mergeBoxEntries(wallEntries);
+      const wallsMesh = new THREE.Mesh(mergedWallGeo, wallMat);
+      group.add(wallsMesh);
     }
 
     if (isLightCell(cx,cy)) {
@@ -403,7 +450,7 @@
     g.traverse(obj=>{
       if (obj.material && obj.material.map === undefined) {} // no-op
       if (obj.geometry && !SHARED_GEOS.has(obj.geometry)) obj.geometry.dispose();
-      if (obj.isMesh && obj.material && obj.material !== wallMat && obj.material !== floorMat && obj.material !== ceilMat) {
+      if (obj.isMesh && obj.material && !SHARED_MATS.has(obj.material)) {
         obj.material.dispose();
       }
     });
@@ -481,7 +528,7 @@
 
   // ---------- 玩家移动与碰撞 ----------
   const WALK_SPEED = 3.2;
-  const RUN_SPEED = 5.6;
+  const RUN_SPEED = 7.6;
   const player = { x:0, z:0, yaw:0, pitch:0, speed:WALK_SPEED, velX:0, velZ:0, bobPhase:0, breathPhase:0 };
   const keys = {};
   let pointerLocked = false;
@@ -684,31 +731,39 @@
   );
   const MONSTER_HEIGHT = WALL_H;              // 高度与房间一样高
   const MONSTER_WIDTH  = MONSTER_HEIGHT;      // 贴图接近正方形，宽度与高度同比例
-  const MONSTER_SPEED  = 3.6;                 // 比正常步行快、比奔跑慢——逼玩家不得不按 shift 冲刺
+  const MONSTER_SPEED  = 4.6;                 // 提速：仍然比奔跑慢，但比原来更有压迫感
   const CATCH_DIST     = 1.1;
   const MONSTER_SPAWN_DIST = 20;              // 与玩家出生点的初始距离
+  const NUM_MONSTERS   = 3;                   // 同时追逐玩家的怪物数量
 
+  // 材质/几何体只做一份，所有怪物共享（各自是独立的 Mesh 实例，只是复用同一份贴图资源）
   const monsterMat = new THREE.MeshBasicMaterial({
     map: monsterTex, transparent: true, alphaTest: 0.05, side: THREE.DoubleSide
   });
   const monsterGeo = new THREE.PlaneGeometry(MONSTER_WIDTH, MONSTER_HEIGHT);
-  const monsterMesh = new THREE.Mesh(monsterGeo, monsterMat);
-  scene.add(monsterMesh);
 
-  const monster = {
-    x:0, z:0, active:false,
-    wanderAngle:0, wanderTimer:0,   // 卡住时的随机游走状态
-    stuckTimer:0, lastCheckDist:Infinity, lastCheckTime:0
-  };
+  const monsters = [];
+  for (let i = 0; i < NUM_MONSTERS; i++) {
+    const mesh = new THREE.Mesh(monsterGeo, monsterMat);
+    scene.add(mesh);
+    monsters.push({
+      mesh, x:0, z:0, active:false,
+      wanderAngle:0, wanderTimer:0,   // 卡住时的随机游走状态
+      stuckTimer: Math.random()*1.2,  // 各自错开检测时机，避免所有怪物同一帧集体判定
+      lastCheckDist: Infinity
+    });
+  }
+
   function spawnMonster(px, pz) {
-    const angle = Math.random() * Math.PI * 2;
-    monster.x = px + Math.sin(angle) * MONSTER_SPAWN_DIST;
-    monster.z = pz + Math.cos(angle) * MONSTER_SPAWN_DIST;
-    monster.active = true;
-    monster.wanderTimer = 0;
-    monster.stuckTimer = 0;
-    monster.lastCheckDist = Infinity;
-    monster.lastCheckTime = 0;
+    for (const m of monsters) {
+      const angle = Math.random() * Math.PI * 2;
+      m.x = px + Math.sin(angle) * MONSTER_SPAWN_DIST;
+      m.z = pz + Math.cos(angle) * MONSTER_SPAWN_DIST;
+      m.active = true;
+      m.wanderTimer = 0;
+      m.stuckTimer = Math.random()*1.2;
+      m.lastCheckDist = Infinity;
+    }
   }
 
   let caught = false;
@@ -730,55 +785,58 @@
   // 一圈候选角度，挑第一个真正走得通的方向前进——这样遇到墙角、拐弯都能自己绕过去，
   // 不会像直线追击那样贴着墙抖动或者干脆卡死不动。
   const WHISKER_OFFSETS_DEG = [0, 20, -20, 40, -40,65, -65, 90, -90, 120, -120, 150, -150, 180];
-  function tryMoveTowardAngle(desiredAngle, stepDist) {
+  function tryMoveMonsterTowardAngle(m, desiredAngle, stepDist) {
     for (const offsetDeg of WHISKER_OFFSETS_DEG) {
       const angle = desiredAngle + offsetDeg * Math.PI / 180;
-      const nx = monster.x + Math.sin(angle) * stepDist;
-      const nz = monster.z + Math.cos(angle) * stepDist;
+      const nx = m.x + Math.sin(angle) * stepDist;
+      const nz = m.z + Math.cos(angle) * stepDist;
       if (!wallBlocksAt(nx, nz)) {
-        monster.x = nx;
-        monster.z = nz;
+        m.x = nx;
+        m.z = nz;
         return true; // 找到能走的方向就立刻用
       }
     }
     return false; // 四周全被堵住（极端情况），这一帧原地不动
   }
 
-  function updateMonster(dt, playerX, playerZ) {
-    if (!monster.active || caught) return;
-    const dx = playerX - monster.x, dz = playerZ - monster.z;
+  function updateMonster(m, dt, playerX, playerZ) {
+    if (!m.active || caught) return;
+    const dx = playerX - m.x, dz = playerZ - m.z;
     const dist = Math.hypot(dx, dz);
 
     // 卡住检测：每隔一段时间看一次和玩家的距离有没有在缩短，
     // 长时间缩短不了（被绕不开的死角卡住、或者在两面墙之间来回蹭）就先随机游走一会儿，
     // 用来打破"探须算法也解不开的局部僵局"。
-    monster.stuckTimer += dt;
-    if (monster.stuckTimer > 1.2) {
-      if (dist > monster.lastCheckDist - 0.4) {
+    m.stuckTimer += dt;
+    if (m.stuckTimer > 1.2) {
+      if (dist > m.lastCheckDist - 0.4) {
         // 一秒多里没能明显靠近玩家，判定为卡住
-        monster.wanderTimer = 1.6 + Math.random() * 1.2;
-        monster.wanderAngle = Math.random() * Math.PI * 2;
+        m.wanderTimer = 1.6 + Math.random() * 1.2;
+        m.wanderAngle = Math.random() * Math.PI * 2;
       }
-      monster.lastCheckDist = dist;
-      monster.stuckTimer = 0;
+      m.lastCheckDist = dist;
+      m.stuckTimer = 0;
     }
 
     if (dist > 0.001) {
       let desiredAngle;
-      if (monster.wanderTimer > 0) {
-        monster.wanderTimer -= dt;
-        desiredAngle = monster.wanderAngle; // 卡住期间：先不管玩家，往随机方向硬闯出去
+      if (m.wanderTimer > 0) {
+        m.wanderTimer -= dt;
+        desiredAngle = m.wanderAngle; // 卡住期间：先不管玩家，往随机方向硬闯出去
       } else {
         desiredAngle = Math.atan2(dx, dz); // 正常状态：直奔玩家
       }
-      tryMoveTowardAngle(desiredAngle, MONSTER_SPEED * dt);
+      tryMoveMonsterTowardAngle(m, desiredAngle, MONSTER_SPEED * dt);
     }
 
-    monsterMesh.position.set(monster.x, MONSTER_HEIGHT/2, monster.z);
+    m.mesh.position.set(m.x, MONSTER_HEIGHT/2, m.z);
     // 只做水平方向的 billboard（贴图始终立着面朝玩家，不会因为抬头低头而跟着诡异倾斜）
-    const bx = camera.position.x - monster.x, bz = camera.position.z - monster.z;
-    monsterMesh.rotation.y = Math.atan2(bx, bz);
+    const bx = camera.position.x - m.x, bz = camera.position.z - m.z;
+    m.mesh.rotation.y = Math.atan2(bx, bz);
     if (dist < CATCH_DIST) triggerCaught();
+  }
+  function updateAllMonsters(dt, playerX, playerZ) {
+    for (const m of monsters) updateMonster(m, dt, playerX, playerZ);
   }
 
 
@@ -1018,7 +1076,7 @@
       }
       updateClock();
       maybeWhisper(now/1000);
-      updateMonster(dt, player.x, player.z);
+      updateAllMonsters(dt, player.x, player.z);
     }
 
     // ---- 视角晃动：走路时的步伐起伏跟随脚步声音频播放进度，静止时是呼吸起伏 ----
